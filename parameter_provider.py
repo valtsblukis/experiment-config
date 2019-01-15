@@ -3,10 +3,9 @@ import sys
 import json
 import datetime
 import copy
-#from collections import namedtuple
 from recordclass import recordclass
 
-CMD_LINE_2ND_ARG = "cmdline"
+CMD_LINE_ARGS = "cmdline"
 
 P = None
 
@@ -167,37 +166,47 @@ def dict_to_obj(d):
     return d_obj
 
 
-def initialize_parameters(setup_name):
-    if setup_name == CMD_LINE_2ND_ARG:
+def initialize_parameters(setup_name_or_names):
+    if setup_name_or_names == CMD_LINE_ARGS:
         assert len(sys.argv) >= 2, "The second command-line argument provided must be the setup name"
-        setup_name = sys.argv[1]
+        setup_names = sys.argv[1:]
+    elif isinstance(setup_name_or_names, str):
+        setup_names = [setup_name_or_names]
+    elif isinstance(setup_name_or_names[0], str):
+        setup_names = setup_name_or_names
+    else:
+        raise ValueError("setup_name_or_names must be string or iterable of strings")
 
-    # Load the base configuration
-    params = _load_params(setup_name)
-    if params is None:
-        print("Whoops! Parameters not found for: " + str(setup_name))
+    merged_params = {}
+    for setup_name in setup_names:
+        # Load the base configuration
+        params = _load_params(setup_name)
+        if params is None:
+            print("Whoops! Parameters not found for: " + str(setup_name))
 
-    if "experiment_name" in params:
-        run_name = params["run_name"]
+        # Load all the included parameters
+        params = _import_include_params(params)
+
+        # Merge this set of parameters into the complete set of parameters
+        merged_params = _dict_merge(merged_params, params)
+
+    # Resolve cross-references
+    merged_params = _resolve_crossreferences(merged_params)
+
+    if "experiment_name" in merged_params:
+        run_name = merged_params["run_name"]
     else:
         run_name = "UntitledRun"
 
-    # Load all the included parameters
-    params = _import_include_params(params)
-
-    # Resolve cross-references
-    params = _resolve_crossreferences(params)
-
     # Convert params dictionary to a python object
-    params_obj = dict_to_obj(params)
+    params_obj = dict_to_obj(merged_params)
 
     # Save for external access
-    global CURRENT_PARAMS, CURRENT_RUN, SETUP_NAME, P
+    global CURRENT_PARAMS, CURRENT_RUN, P
     P = params_obj
-    CURRENT_PARAMS = params
+    CURRENT_PARAMS = merged_params
     CURRENT_RUN = run_name
-    SETUP_NAME = setup_name
-    _log_experiment_start(run_name, params)
+    _log_experiment_start(run_name, ":".join(setup_names))
 
 
 def get_stamp():
@@ -236,8 +245,3 @@ def _get_parameter_from_dict(d, *addr):
 def get_run_name():
     global CURRENT_RUN
     return CURRENT_RUN
-
-
-def get_setup_name():
-    global SETUP_NAME
-    return SETUP_NAME
